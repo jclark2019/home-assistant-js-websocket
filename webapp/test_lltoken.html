@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+  <!-- To try locally, run: `yarn build` and then `npx http-server -o` -->
+
+  <body>
+    <button onclick="connection.reconnect()">Reconnect</button>
+    <button onclick="setupEntitiesSubscription()">Re-subscribe</button>
+    <button id="toggleOfficeLight">Office Light</button>
+    <button id="toggleHangingLight">Hanging Light</button>
+    <table>
+      <tbody></tbody>
+    </table>
+    <script type="module">
+      import {
+        getAuth,
+        getUser,
+        callService,
+        createConnection,
+        subscribeEntities,
+        ERR_HASS_HOST_REQUIRED,
+        createLongLivedTokenAuth,
+      } from "/public/home-assistant-js-websocket/dist/index.js";
+
+      (async () => {
+        const auth = createLongLivedTokenAuth(
+            "http://homeassistant.local:8123",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyNDZlNTQ1NjQxMDA0MDU2OTFmYWZlMDg2MGExOGQ0MSIsImlhdCI6MTc5Mzk1ODY4NiwiZXhwIjoyMTA5MzE4Njg2fQ.hXjW_RuzoV6aHGTyKKtoxseED8l-wtQo5UakEYfAkzU",
+        );
+        const connection = await createConnection({ auth });
+        for (const ev of ["disconnected", "ready", "reconnect-error"]) {
+          connection.addEventListener(ev, () => console.log(`Event: ${ev}`));
+        }
+
+        // subscribeEntityStates(connection, (states) => {
+        //     console.log("New states:", states);
+        // });
+
+        // Clear url if we have been able to establish a connection
+        if (location.search.includes("auth_callback=1")) {
+          history.replaceState(null, "", location.pathname);
+        }
+
+        // To play from the console
+        window.auth = auth;
+        window.connection = connection;
+        getUser(connection).then((user) => {
+          console.log("Logged in as", user);
+          window.user = user;
+        });
+
+   // setupEntitiesSubscription();
+
+  // 3. Listen to all entity updates in real-time
+  subscribeEntities(connection, (entities) => {
+    // This runs immediately upon connection, and then every time a state changes
+    renderApp(entities);
+  });
+
+ })();
+
+     let unsubEntities;
+
+      window.setupEntitiesSubscription = async () => {
+        if (unsubEntities) {
+          unsubEntities();
+          console.log("Sleeping");
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+        }
+        unsubEntities = subscribeEntities(connection, (entities) =>
+          //renderEntities(connection, entities),
+          renderApp(entities),
+        );
+      };
+
+
+
+    function renderApp(entities) {
+        // Example: Grab a specific light fixture state
+        const livingRoomLight = entities["light.table_lamp_2"];
+        if (livingRoomLight) {
+            console.log(`The light is currently: ${livingRoomLight.state}`);
+        }
+    }
+
+    async function toggleDevice(connection, entityId) {
+        // Extract the domain (e.g., 'light' or 'switch') from the entity ID
+        const domain = entityId.split(".")[0];
+
+        try {
+            await callService(connection, domain, "toggle", {
+            entity_id: entityId
+            });
+            console.log(`Successfully toggled ${entityId}`);
+        } catch (error) {
+            console.error(`Failed to toggle ${entityId}:`, error);
+        }
+    }
+    // Usage examples:
+    // toggleDevice(connection, "light.living_room_light");
+    // toggleDevice(connection, "switch.coffee_maker");
+
+    document.getElementById('toggleOfficeLight').addEventListener('click', (ev) => {
+        toggleDevice(connection, 'light.office_light')
+    })
+
+    document.getElementById('toggleHangingLight').addEventListener('click', (ev) => {
+        toggleDevice(connection, 'light.hanging_light')
+    })
+
+
+    async function turnOnLightWithSettings(connection, lightEntityId) {
+        await callService(connection, "light", "turn_on", {
+            entity_id: lightEntityId,
+            brightness_pct: 75,          // Set brightness to 75%
+            transition: 2                // Fade in over 2 seconds
+        });
+    }
+
+    </script>
+  </body>
+</html>
