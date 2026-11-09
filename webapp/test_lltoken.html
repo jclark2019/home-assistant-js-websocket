@@ -1,12 +1,113 @@
 <!doctype html>
-<html>
-  <!-- To try locally, run: `yarn build` and then `npx http-server -o` -->
-
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HA Device Controller SPA</title>
+    <style>
+        :root {
+            --bg-color: #1a1a24;
+            --card-bg: #252538;
+            --text-color: #ffffff;
+            --accent-color: #3b82f6;
+            --active-color: #10b981;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            font-size: 14px;
+        }
+        .container { max-width: 80vw; margin: 0 auto; }
+        h1 {
+          color: #999;
+          font-weight: 600;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 120px;
+        }
+        .card > div {
+            display: flex;
+            flex-flow: column nowrap;
+            justify-content: space-between;
+            align-items: stretch;
+        }
+        .card h3 { margin: 0 0 8px 0; font-size: 1.1rem;  }
+        .state-badge { font-weight: bold; color: #9ca3af; margin-bottom: 15px; flex: 1; height: stretch; }
+        .state-badge.on { color: var(--active-color); }
+        button  {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        button.inactive {
+            background-color: #999;
+            color: #444;
+            cursor:not-allowed;
+        }
+        .toolbar {
+            display: flex;
+            flex-flow: row nowrap;
+            gap: 20px;
+        }
+        .toolbar > button.active {
+            background-color: var(--active-color);
+        }
+        .toolbar > .spacer {
+          width: 25px;
+        }
+        .card .attributes { visibility: hidden; transition: all 0.3s; }
+        .card .attributes.show { visibility: visible; }
+        #modal { position: absolute; height: 0; width: 0; top: 0; left: 30vw; background-color: rgba(0,0,0,0.375); border-radius: 20px; backdrop-filter: blur(10px); opacity: 0; transition: all 0.3s; }
+        #modal.show { top: 25vh; height: 50vh; width: 40vw; opacity: 1; }
+        #modalInner { display: flex; flex-flow: column nowrap; width: 37vw; height: 0; margin: 2vh; background-color: rgba(255,255,255,0.5); color: rgba(1,1,1,1); padding: 15px; border-radius: 11px; } /*white-space: pre-wrap; text-wrap: pretty; */
+        #modal.show #modalInner { height: calc(46vh - 30px);  }
+        #modalInner > div { flex: 1; display: flex; flex-flow: row nowrap;  }
+        #modalInner > div.even { background-color: rgba(0,0,0,0.1); }
+        #modalInner > div > span { padding: 5px 10px; }
+        #modalInner > div > span.key { flex: 1; }
+        #modalInner > div > span.value { flex: 2; }
+        #modal .close { position: absolute; top: -10px; right: -13px; font-size: 2rem; border-radius: 50%; padding: 5px 10px; color: rgba(255,255,255,0.5); background-color: rgb(0,0,0); font-weight: bold; cursor: pointer; }
+         #modal .close:hover  {background-color: rgba(255,255,255,0.5); color: rgb(0,0,0); }
+    </style>
+</head>
   <body>
+  <div class="toolbar">
     <button onclick="connection.reconnect()">Reconnect</button>
     <button onclick="setupEntitiesSubscription()">Re-subscribe</button>
+    <div class="spacer"></div>
     <button id="toggleOfficeLight">Office Light</button>
     <button id="toggleHangingLight">Hanging Light</button>
+    <div class="spacer"></div>
+    <button id="toggleRainbow">Rainbow Flow</button>
+    <button id="toggleDisco">Disco Rainbow</button>
+    <button id="toggleFade">Fader</button>
+    <button id="btnStop">Stop</button>
+    <input type="range" id="speed" min="50" max="1000" value="500">
+
+    <input type="range" id="step" min="1" max="16" value="4">
+    </div>
     <table>
       <tbody></tbody>
     </table>
@@ -20,6 +121,8 @@
         ERR_HASS_HOST_REQUIRED,
         createLongLivedTokenAuth,
       } from "/public/home-assistant-js-websocket/dist/index.js";
+
+      let frame = 0, speed = 500;
 
       (async () => {
         const auth = createLongLivedTokenAuth(
@@ -95,9 +198,91 @@
             console.error(`Failed to toggle ${entityId}:`, error);
         }
     }
+
+    const map = (n, a, b, c, d) => ((n - a) * (d - c)) / (b - a) + c;
+
+    let lastCheck = 0
+    let h = 0;
+
+    async function rainbowFlow(connection, entityId, entityId2, h) {
+      await callService(connection, "light", "turn_on", {
+        hs_color: [h, 100] // [Hue (0-360), Saturation (0-100)]
+      }, {
+        entity_id: entityId // Your light's entity ID
+      });
+
+      await callService(connection, "light", "turn_on", {
+        hs_color: [360 - h, 100] // [Hue (0-360), Saturation (0-100)]
+      }, {
+        entity_id: entityId2 // Your light's entity ID
+      });
+    }
+
+    async function disco(connection, entityId, entityId2, h) {
+      await callService(connection, "light", "turn_on", {
+         hs_color: [h, 100],
+         brightness: map(h, 0, 360, 0, 255)
+      }, {
+        entity_id: entityId // Your light's entity ID
+      });
+
+      await callService(connection, "light", "turn_on", {
+        hs_color: [360 - h, 100] ,
+        brightness: map(h, 0, 360, 255, 0)
+      }, {
+        entity_id: entityId2 // Your light's entity ID
+      });
+    }
+
+
+    async function fadeInOut(connection, entityId, entityId2, h) {
+      await callService(connection, "light", "turn_on", {
+         brightness: map(h, 0, 360, 0, 255)
+      }, {
+        entity_id: entityId // Your light's entity ID
+      });
+
+      await callService(connection, "light", "turn_on", {
+        brightness: map(h, 0, 360, 255, 0)
+      }, {
+        entity_id: entityId2 // Your light's entity ID
+      });
+    }
+
+    function animate(ts, connection, effect, entityId, entityId2) {
+      const speed = 1000 - document.getElementById('speed').value
+      const step = document.getElementById('step').value
+      if(ts - speed > lastCheck) {
+        lastCheck = ts;
+        if(effect === 'rainbow')
+            rainbowFlow(connection, entityId, entityId2, h)
+        if(effect === 'fade')
+            fadeInOut(connection, entityId, entityId2, h)
+        if(effect === 'disco')
+            disco(connection, entityId, entityId2, h)
+        h = (h + step) % 360;
+      }
+      frame = requestAnimationFrame((ts) => animate(ts, connection, effect, entityId, entityId2));
+    }
+
+    function stop() {
+      cancelAnimationFrame(frame)
+      frame = 0
+    }
+
+
     // Usage examples:
     // toggleDevice(connection, "light.living_room_light");
     // toggleDevice(connection, "switch.coffee_maker");
+    document.getElementById('toggleRainbow').addEventListener('click', (ev) => {
+        requestAnimationFrame((ts) => animate(ts, connection, 'rainbow', 'light.office_light', 'light.hanging_light'));
+    })
+    document.getElementById('toggleDisco').addEventListener('click', (ev) => {
+        requestAnimationFrame((ts) => animate(ts, connection, 'disco', 'light.office_light', 'light.hanging_light'));
+    })
+    document.getElementById('toggleFade').addEventListener('click', (ev) => {
+        requestAnimationFrame((ts) => animate(ts, connection, 'fade', 'light.office_light', 'light.hanging_light'));
+    })
 
     document.getElementById('toggleOfficeLight').addEventListener('click', (ev) => {
         toggleDevice(connection, 'light.office_light')
@@ -105,6 +290,10 @@
 
     document.getElementById('toggleHangingLight').addEventListener('click', (ev) => {
         toggleDevice(connection, 'light.hanging_light')
+    })
+
+    document.getElementById('btnStop').addEventListener('click', (ev) => {
+        stop()
     })
 
 

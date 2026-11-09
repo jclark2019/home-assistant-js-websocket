@@ -12,6 +12,9 @@
             --accent-color: #3b82f6;
             --active-color: #10b981;
         }
+        * {
+          user-select: none;
+        }
         body {
             font-family: system-ui, -apple-system, sans-serif;
             background-color: var(--bg-color);
@@ -19,8 +22,10 @@
             margin: 0;
             padding: 20px;
             font-size: 14px;
+            overflow: hidden;
         }
-        .container { max-width: 80vw; margin: 0 auto; }
+        .header { max-width: 80vw; height: 95px; margin: 0 auto;  }
+        .container { max-width: 80vw; max-height: calc(100vh - 155px); margin: 0 auto; overflow-y: scroll; }
         h1 {
           color: #999;
           font-weight: 600;
@@ -29,7 +34,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
             gap: 15px;
-            margin-top: 20px;
+            margin-top: 5px;
         }
         .card {
             background: var(--card-bg);
@@ -39,10 +44,29 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
+            min-height: 120px;
         }
-        .card h3 { margin: 0 0 8px 0; font-size: 1.1rem; }
-        .state-badge { font-weight: bold; color: #9ca3af; margin-bottom: 15px; }
+        .card > div {
+            display: flex;
+            flex-flow: column nowrap;
+            justify-content: space-between;
+            align-items: stretch;
+        }
+        .card h3 { margin: 0 0 8px 0; font-size: 1.1rem;  }
+        .state-badge { font-weight: bold; color: #9ca3af; margin-bottom: 15px; flex: 1; height: stretch; }
         .state-badge.on { color: var(--active-color); }
+        .card .toggle-link {
+            color: #999;
+            text-align: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-decoration: none;
+            margin-top: 7px;
+        }
+        .card .toggle-link:hover {
+          color: #9a9a9a;
+          background-color: rgba(0,0,0,0.25);
+        }
         button  {
             background-color: var(--accent-color);
             color: white;
@@ -59,25 +83,57 @@
             color: #444;
             cursor:not-allowed;
         }
+        .toolbar  { display: flex; flex-direction: row; gap: 10px; }
+        .toolbar > button { min-width: 75px; }
+        .toolbar > button.active {
+            background-color: var(--active-color);
+        }
+        .toolbar .spacer { width: 25px; }
+        .toolbar .spacer-stretch { flex: 1; }
+        .toolbar #stats { padding-left: 15px; }
+        .card .attributes { visibility: hidden; transition: all 0.3s; }
+        .card .attributes.show { visibility: visible; }
+        #modal { position: absolute; height: 0; width: 0; top: 0; left: 30vw; background-color: rgba(0,0,0,0.375); border-radius: 20px; backdrop-filter: blur(10px); opacity: 0; transition: all 0.3s; }
+        #modal.show { top: 25vh; height: 50vh; width: 40vw; opacity: 1; }
+        #modalInner { display: flex; flex-flow: column nowrap; width: 37vw; height: 0; margin: 2vh; overflow-y: scroll; background-color: rgba(255,255,255,0.5); color: rgba(1,1,1,1); padding: 0px 15px 10px 15px; border-radius: 11px; } /*white-space: pre-wrap; text-wrap: pretty; */
+        #modal.show #modalInner { height: calc(48vh - 30px);  }
+        #modalInner > div { flex: 1; display: flex; flex-flow: row nowrap;  }
+        #modalInner > div.even { background-color: rgba(0,0,0,0.1); }
+        #modalInner > div > span { padding: 5px 10px; }
+        #modalInner > div > span.key { flex: 1; }
+        #modalInner > div > span.value { flex: 2; }
+        #modal .close { position: absolute; top: -10px; right: -13px; font-size: 2rem; border-radius: 50%; padding: 2px 10px; color: rgba(255,255,255,0.5); background-color: rgb(0,0,0); font-weight: bold; cursor: pointer; }
+         #modal .close:hover  {background-color: rgba(255,255,255,0.5); color: rgb(0,0,0); }
     </style>
 </head>
   <body>
 
-
-    <div class="container">
-        <h1>Smart Home Dashboard</h1>
+    <div class="header">
+        <h1>Home Assistant Dashboard</h1>
         <div class="toolbar">
-          <button onclick="connection.reconnect()">Reconnect</button>
-          <button id="btnLights">Lights</button>
-          <button id="btnSwitches">Switches</button>
-          <button id="btnSensors">Sensors</button>
-          <button id="btnBSensors">Binary Sensors</button></div>
+            <div id="stats">Select a filter:</div>
+            <button data-domain="all">All</button>
+            <button data-domain="lightsOnly">Lights</button>
+            <button data-domain="switchesOnly">Switches</button>
+            <button data-domain="sensorsOnly">Sensors</button>
+            <button data-domain="binarySensorsOnly">Binary Sensors</button>
+            <button data-domain="buttonsOnly">Button</button>
+            <button data-domain="weatherOnly">Weather</button>
+            <label for="cbShowUnavailable"><input type="checkbox" id="cbShowUnavailable" name="unavailable" value="no"> Show Unavailable</label>
+            <div class="spacer-stretch"></div>
+            <button onclick="connection.reconnect()">Reconnect</button>
+            <button onclick="return null;">Logout</button>
+            <div class="spacer"></div>
+        </div>
+    </div>
+    <div class="container">
         <div id="device-grid" class="grid"></div>
     </div>
 
     <table class="entTable">
       <tbody></tbody>
     </table>
+    <div id="modal"><div id="modalInner"></div><div id="closeModal" class="close">X</div></div>
     <script type="module">
       import {
       Auth,
@@ -86,6 +142,8 @@
       subscribeEntityStates,
       createLongLivedTokenAuth,
       } from "/public/home-assistant-js-websocket/dist/index.js";
+
+      let  entFilter = null, showUnavailable = document.getElementById('cbShowUnavailable').checked,  totalEntities = 0, showingEntities = 0;
 
       (async () => {
         const auth = createLongLivedTokenAuth(
@@ -98,8 +156,25 @@
 
         subscribeEntityStates(connection, (entities) => {
 
+          const domains = {}
+
+  domains.all = Object.keys(entities)
+    .filter(key => entities[key] !== null)
+    .reduce((acc, entityId) => {
+      acc[entityId] = entities[entityId];
+      return acc;
+    }, {});
+
+const prefixes = ["light.", "switch.", "sensor."];
+const filteredEntities = Object.keys(entities)
+  .filter(entityId => prefixes.some(prefix => entityId.startsWith(prefix)))
+  .reduce((acc, entityId) => {
+    acc[entityId] = entities[entityId];
+    return acc;
+  }, {});
+
           // 1. Filter out only 'light' entities
-  const lightsOnly = Object.keys(entities)
+  domains.lightsOnly = Object.keys(entities)
     .filter(entityId => entityId.startsWith("light."))
     .reduce((acc, entityId) => {
       acc[entityId] = entities[entityId];
@@ -107,7 +182,7 @@
     }, {});
 
   // 2. Filter out only 'switch' entities
-  const switchesOnly = Object.keys(entities)
+  domains.switchesOnly = Object.keys(entities)
     .filter(entityId => entityId.startsWith("switch."))
     .reduce((acc, entityId) => {
       acc[entityId] = entities[entityId];
@@ -115,7 +190,7 @@
     }, {});
 
     // 2. Filter out only 'switch' entities
-  const sensorsOnly = Object.keys(entities)
+  domains.sensorsOnly = Object.keys(entities)
     .filter(entityId => entityId.startsWith("sensor."))
     .reduce((acc, entityId) => {
       acc[entityId] = entities[entityId];
@@ -123,32 +198,58 @@
     }, {});
 
     // 2. Filter out only 'switch' entities
-  const binarySensorsOnly = Object.keys(entities)
+  domains.binarySensorsOnly = Object.keys(entities)
     .filter(entityId => entityId.startsWith("binary_sensor."))
     .reduce((acc, entityId) => {
       acc[entityId] = entities[entityId];
       return acc;
     }, {});
 
+    // 2. Filter out only 'switch' entities
+  domains.weatherOnly = Object.keys(entities)
+    .filter(entityId => entityId.startsWith("weather."))
+    .reduce((acc, entityId) => {
+      acc[entityId] = entities[entityId];
+      return acc;
+    }, {});
 
-      document.getElementById('btnLights').addEventListener('click', (ev) => {
-          renderUI(connection, lightsOnly)
-      })
+    // 2. Filter out only 'switch' entities
+  domains.buttonsOnly = Object.keys(entities)
+    .filter(entityId => entityId.startsWith("button."))
+    .reduce((acc, entityId) => {
+      acc[entityId] = entities[entityId];
+      return acc;
+    }, {});
 
-      document.getElementById('btnSwitches').addEventListener('click', (ev) => {
-          renderUI(connection, switchesOnly)
-      })
 
-      document.getElementById('btnSensors').addEventListener('click', (ev) => {
-          renderUI(connection, sensorsOnly)
-      })
+    const toolbar = document.querySelector('.toolbar')
+    const tbLinks = toolbar.querySelectorAll('button[data-domain]')
+    for (const btn of tbLinks) {
+        btn.addEventListener('click', (ev) => {
+            if(!ev.target.classList.contains('active')) {
+              tbLinks.forEach(b => { b.classList.remove('active') })
+              entFilter = domains[`${ev.target.dataset.domain}`]
+              renderUI(connection, entFilter)
+              ev.target.classList.add('active')
+            } else {
+              ev.target.classList.remove('active')
+              entFilter = null
+              clearUI()
+            }
+        })
+    }
 
-      document.getElementById('btnBSensors').addEventListener('click', (ev) => {
-          renderUI(connection, binarySensorsOnly)
-      })
+    document.getElementById('cbShowUnavailable').addEventListener('change', (ev) => {
+        if(entFilter !== null) renderUI(connection, entFilter)
+    })
+
+    document.getElementById('closeModal').addEventListener("click", (ev) => {
+        document.getElementById('modal').classList.remove('show')
+    })
 
   });
 })();
+
 
 
 async function toggleDevice(connection, entityId, entState) {
@@ -176,9 +277,34 @@ async function toggleDevice(connection, entityId, entState) {
         }
     }
 
+function showModal(entity) {
+    // content = JSON.stringify(content)
+    // content = content.replaceAll("{", "{\n\t")
+    // content = content.replaceAll(',"', ',\n\t"')
+    // content = content.replaceAll("}", "\n}")
+    // content = content.replaceAll(":", ":\t")
+    let op, i = 0;
+    op = `<div><h3>${entity.attributes.friendly_name} - ${entity.state}</h3></div>`
+    for (const [key, value] of Object.entries(entity.attributes)) {
+        const rclas = (i%2 === 0) ? 'even' : 'odd'
+        op += `<div class="entAttribute ${rclas}"><span class="key">${key}</span><span class="value">${value}</span></div>`
+        i++;
+    }
+    document.getElementById('modalInner').innerHTML = `${op}`
+    document.getElementById('modal').classList.add('show')
+
+}
+
+function clearUI() {
+    document.getElementById("device-grid").replaceChildren();
+}
+
 function renderUI(connection, entities) {
     const grid = document.getElementById("device-grid");
-    grid.innerHTML = ""; // Clear for reactive redraw
+    grid.replaceChildren(); //innerHTML = ""; // Clear for reactive redraw
+
+    showUnavailable = document.getElementById('cbShowUnavailable').checked
+    //const entitiesToShow = (showUnavailable.checked) ? entities : entities.filter(ent => ent.state !== 'unavailable');
 
     Object.keys(entities).sort().forEach(entityId => {
         const entity = entities[entityId];
@@ -186,40 +312,60 @@ function renderUI(connection, entities) {
         const state = entity.state;
         const isTargetOn = state === "on";
 
-        const card = document.createElement("div");
-        card.className = "card";
-        const cardInner = document.createElement("div");
-        const cardHead = document.createElement("h3");
-          cardHead.textContent = `${name}`
-          cardInner.appendChild(cardHead)
-        const cardState= document.createElement("div");
-          cardState.classList.add('state-badge')
-          cardState.id = `${entityId}_state`
-          cardState.dataset.state = `${state}`
-          if(isTargetOn)
-              cardState.classList.add('on')
-          cardState.innerHTML = `${state.toUpperCase()}`
-          cardInner.appendChild(cardState)
-        const button = document.createElement("button");
-          button.innerHTML = "Toggle";
+        if(state !== 'unavailable' || showUnavailable) {
+          const card = document.createElement("div");
+          card.classList.add("card");
           if(state === 'unavailable')
-            button.className = 'inactive'
-          button.onclick = () =>
-            // callService(connection, "homeassistant", "toggle", {
-            //   entity_id: entityId,
-            // });
-            toggleDevice(connection, entityId, state)
-          cardInner.appendChild(button)
-        card.appendChild(cardInner)
+              card.classList.add("unavailable");
+          const cardInner = document.createElement("div");
+          const cardHead = document.createElement("h3");
+            cardHead.textContent = `${name}`
+            cardInner.appendChild(cardHead)
+          const cardState= document.createElement("div");
+            cardState.classList.add('state-badge')
+            cardState.id = `${entityId}_state`
+            cardState.dataset.state = `${state}`
+            if(isTargetOn)
+                cardState.classList.add('on')
+            cardState.innerHTML = `${state.toUpperCase()}`
+            cardInner.appendChild(cardState)
+          const button = document.createElement("button");
+            button.innerHTML = "Toggle";
+            if(state === 'unavailable')
+              button.className = 'inactive'
+            button.onclick = () => toggleDevice(connection, entityId, state)
+              // callService(connection, "homeassistant", "toggle", {
+              //   entity_id: entityId,
+              // });
+            cardInner.appendChild(button)
+          const toggledetails = document.createElement('a')
+          toggledetails.className = 'toggle-link'
+          toggledetails.href = '#'
+          toggledetails.textContent = "More"
+          toggledetails.dataset.entId = `${entityId}`
 
-        // card.innerHTML = `
-        //     <div>
-        //         <h3>${name}</h3>
-        //         <div class="state-badge ${isTargetOn ? 'on' : ''}">${state.toUpperCase()}</div>
-        //     </div>
-        //     <button onClick="callService(connection, 'homeassistant', 'toggle', { entity_id: ${entityId}, });">Toggle</button>
-        // `;
-        grid.appendChild(card);
+            toggledetails.onclick = (ev) => {
+              ev.preventDefault();
+              //ev.target.nextElementSibling.classList.toggle('show')
+              showModal(entity)
+            }
+          cardInner.appendChild(toggledetails)
+          // const details = document.createElement('div')
+          // details.className = 'attributes'
+          // details.textContent = `${JSON.stringify(entity.attributes)}`
+          // cardInner.appendChild(details)
+
+          card.appendChild(cardInner)
+
+          // card.innerHTML = `
+          //     <div>
+          //         <h3>${name}</h3>
+          //         <div class="state-badge ${isTargetOn ? 'on' : ''}">${state.toUpperCase()}</div>
+          //     </div>
+          //     <button onClick="callService(connection, 'homeassistant', 'toggle', { entity_id: ${entityId}, });">Toggle</button>
+          // `;
+          grid.appendChild(card);
+        }
     });
 }
 
